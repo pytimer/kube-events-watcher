@@ -30,6 +30,7 @@ type Watcher interface {
 
 type eventWatcher struct {
 	reflector *cache.Reflector
+	sink      sinks.Sink
 }
 
 func (e *eventWatcher) Run(stopCh <-chan struct{}) {
@@ -41,7 +42,14 @@ func (e *eventWatcher) Run(stopCh <-chan struct{}) {
 		e.reflector.Run(stopCh)
 	}()
 
-	klog.Info("stoped")
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		klog.Info("start sinks")
+		e.sink.Run(stopCh)
+	}()
+
+	klog.Info("stopped")
 	wg.Wait()
 }
 
@@ -76,5 +84,6 @@ func NewEventWatcher(client kubernetes.Interface, sink sinks.Sink, resyncPeriod 
 			newWatcherStore(storeConfig),
 			resyncPeriod,
 		),
+		sink: sink,
 	}
 }

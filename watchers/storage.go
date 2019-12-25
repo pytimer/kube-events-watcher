@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/klog"
 )
 
 // StorageType defines what storage should be used as a cache for the watcher.
@@ -32,17 +31,30 @@ type watcherStore struct {
 }
 
 func (s *watcherStore) Add(obj interface{}) error {
-	klog.Info("OnAdd event, ", obj)
+	if err := s.Store.Add(obj); err != nil {
+		return err
+	}
+	s.handler.OnAdd(obj)
 	return nil
 }
 
 func (s *watcherStore) Update(obj interface{}) error {
-	klog.Info("OnUpdate event, ", obj)
+	oldObj, exists, err := s.Store.Get(obj)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		oldObj = nil
+	}
+	s.handler.OnUpdate(oldObj, obj)
 	return nil
 }
 
 func (s *watcherStore) Delete(obj interface{}) error {
-	klog.Info("OnDelete event, ", obj)
+	if err := s.Store.Delete(obj); err != nil {
+		return err
+	}
+	s.handler.OnDelete(obj)
 	return nil
 }
 

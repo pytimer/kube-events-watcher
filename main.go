@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pytimer/kube-events-watcher/flags"
+	"github.com/pytimer/kube-events-watcher/sinks"
 	"github.com/pytimer/kube-events-watcher/watchers"
 	"github.com/spf13/pflag"
 	"k8s.io/client-go/kubernetes"
@@ -21,6 +23,7 @@ var (
 	level      string
 	kubeconfig string
 	resyncPeriod        time.Duration
+	sink flags.Uri
 )
 
 func listenSystemStopSignal() chan struct{} {
@@ -66,17 +69,24 @@ func main() {
 	pflag.StringVarP(&level, "v", "v", "0", "log level for V logs")
 	pflag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file. Optional, if the kubeconfig empty, this controller is running in a kubernetes cluster.")
 	pflag.DurationVar(&resyncPeriod, "resync-period", 1 *time.Minute, "Watcher reflector resync period")
+	// e.g. --sink=elasticsearch:http://elasticsearch.com:9200
+	pflag.Var(&sink, "sink", "Sink type to save the kubernetes events")
 	pflag.Parse()
 	logs.GlogSetter(level)
 
 	klog.Info("kube-events-watcher starting...")
 	stopCh := listenSystemStopSignal()
 
+	sink, err := sinks.NewEventSinkManager(sink)
+	if err != nil {
+		klog.Fatalf("Failed to initialize sink: %v", err)
+	}
+
 	client, err := newKubernetesClient()
 	if err != nil {
 		klog.Fatalf("Failed to initialize kubernetes client: %v", err)
 	}
 
-	eventWatcher := watchers.NewEventWatcher(client, nil, resyncPeriod)
+	eventWatcher := watchers.NewEventWatcher(client, sink, resyncPeriod)
 	eventWatcher.Run(stopCh)
 }
