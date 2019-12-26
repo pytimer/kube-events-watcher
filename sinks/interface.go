@@ -25,6 +25,7 @@ type Sink interface {
 func NewEventSinkManager(u flags.Uri) (Sink, error){
 	switch u.Key {
 	case "elasticsearch":
+		return newElasticsearchSink(u.Val.String())
 	case "file":
 		return newFileSink(u.Val.String())
 	}
