@@ -32,7 +32,7 @@ func (f FileSink) Run(stopCh <-chan struct{}) {
 	for {
 		select {
 		case entry := <-f.entryChannel:
-			_, err := f.writer.Write([]byte(entry.String()+"\n"))
+			_, err := f.writer.Write([]byte(entry.String() + "\n"))
 			if err != nil {
 				klog.Errorf("File sink write event to file error: %v", err)
 				continue

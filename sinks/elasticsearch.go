@@ -75,7 +75,7 @@ func (e *ElasticsearchSink) sendEntries(entries []*corev1.Event) {
 			continue
 		}
 		data = append(data, "\n"...)
-		buf.Grow(len(meta)+len(data))
+		buf.Grow(len(meta) + len(data))
 		buf.Write(meta)
 		buf.Write(data)
 	}
@@ -94,7 +94,7 @@ func newElasticsearchSink(uri string) (*ElasticsearchSink, error) {
 	cfg := elasticsearch.Config{
 		Addresses:  []string{uri},
 		MaxRetries: 5,
-		Logger:     &estransport.ColorLogger{Output: os.Stdout, EnableRequestBody:true},
+		Logger:     &estransport.ColorLogger{Output: os.Stdout, EnableRequestBody: true},
 	}
 	esClient, err := elasticsearch.NewClient(cfg)
 	if err != nil {

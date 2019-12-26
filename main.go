@@ -20,10 +20,10 @@ import (
 )
 
 var (
-	level      string
-	kubeconfig string
-	resyncPeriod        time.Duration
-	sink flags.Uri
+	level        string
+	kubeconfig   string
+	resyncPeriod time.Duration
+	sink         flags.Uri
 )
 
 func listenSystemStopSignal() chan struct{} {
@@ -68,7 +68,7 @@ func main() {
 
 	pflag.StringVarP(&level, "v", "v", "0", "log level for V logs")
 	pflag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file. Optional, if the kubeconfig empty, this controller is running in a kubernetes cluster.")
-	pflag.DurationVar(&resyncPeriod, "resync-period", 1 *time.Minute, "Watcher reflector resync period")
+	pflag.DurationVar(&resyncPeriod, "resync-period", 1*time.Minute, "Watcher reflector resync period")
 	// e.g. --sink=elasticsearch:http://elasticsearch.com:9200
 	pflag.Var(&sink, "sink", "Sink type to save the kubernetes events")
 	pflag.Parse()

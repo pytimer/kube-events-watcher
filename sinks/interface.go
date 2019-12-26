@@ -14,15 +14,15 @@ import (
 	"github.com/pytimer/kube-events-watcher/flags"
 )
 
-var defaultMaxBufferSize  = 1000
+var defaultMaxBufferSize = 1000
 
 type Sink interface {
 	events.EventHandler
 
-	Run(stopCh <- chan struct{})
+	Run(stopCh <-chan struct{})
 }
 
-func NewEventSinkManager(u flags.Uri) (Sink, error){
+func NewEventSinkManager(u flags.Uri) (Sink, error) {
 	switch u.Key {
 	case "elasticsearch":
 		return newElasticsearchSink(u.Val.String())

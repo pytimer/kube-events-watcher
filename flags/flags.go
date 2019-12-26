@@ -26,7 +26,6 @@ func (u *Uri) String() string {
 	return fmt.Sprintf("%s:%s", u.Key, val)
 }
 
-
 func (u *Uri) Set(value string) error {
 	s := strings.SplitN(value, ":", 2)
 	if s[0] == "" {
