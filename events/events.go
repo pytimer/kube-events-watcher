@@ -28,14 +28,14 @@ func NewEventHandlerWrapper(h EventHandler) *eventHandlerWrapper {
 }
 
 func (e *eventHandlerWrapper) OnAdd(obj interface{}) {
-	//klog.Info("OnAdd event, ", obj)
+	klog.V(5).Infof("eventHandlerWrapper OnAdd event, %v", obj)
 	if event := e.convertToEvent(obj); event != nil {
 		e.handler.OnAdd(event)
 	}
 }
 
 func (e *eventHandlerWrapper) OnUpdate(oldObj, newObj interface{}) {
-	//klog.Info("OnUpdate event, ", oldObj, newObj)
+	klog.V(5).Infof("eventHandlerWrapper OnUpdate event, %v", oldObj)
 	old := e.convertToEvent(oldObj)
 	newEvent := e.convertToEvent(newObj)
 	if newEvent != nil && old != nil {
@@ -44,7 +44,7 @@ func (e *eventHandlerWrapper) OnUpdate(oldObj, newObj interface{}) {
 }
 
 func (e *eventHandlerWrapper) OnDelete(obj interface{}) {
-	//klog.Info("OnDelete event, ", obj)
+	klog.V(5).Infof("eventHandlerWrapper OnDelete event, %v", obj)
 	event := e.convertToEvent(obj)
 	if event == nil {
 		// When a delete is dropped, the relist will notice a pod in the store not

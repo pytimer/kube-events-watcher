@@ -63,11 +63,10 @@ func newWatcherStore(config *WatcherStoreConfig) *watcherStore {
 	switch config.StorageType {
 	case TTLStorage:
 		cacheStorage = cache.NewTTLStore(config.KeyFunc, config.StorageTTL)
-		break
 	case SimpleStorage:
+		fallthrough
 	default:
 		cacheStorage = cache.NewStore(config.KeyFunc)
-		break
 	}
 
 	return &watcherStore{

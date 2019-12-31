@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
@@ -13,6 +14,10 @@ import (
 	"k8s.io/klog"
 )
 
+var (
+	defaultIndexName = "kube-events"
+)
+
 type ElasticsearchSink struct {
 	client        *elasticsearch.Client
 	entryChannel  chan *corev1.Event
@@ -20,17 +25,21 @@ type ElasticsearchSink struct {
 }
 
 func (e *ElasticsearchSink) OnAdd(event *corev1.Event) {
+	klog.V(4).Infof("Elasticsearch sink OnAdd event, %v", event)
 	e.entryChannel <- event
 }
 
 func (e *ElasticsearchSink) OnUpdate(old, new *corev1.Event) {
+	klog.V(4).Infof("Elasticsearch sink OnUpdate event, %v", old)
 	e.entryChannel <- new
 }
 
 func (e *ElasticsearchSink) OnDelete(event *corev1.Event) {
+	klog.V(4).Infof("Elasticsearch sink OnDelete event, %v, so skip it.", event)
 }
 
 func (e *ElasticsearchSink) Run(stopCh <-chan struct{}) {
+	klog.Info("Starting elasticsearch sink...")
 	t := time.NewTicker(5 * time.Second)
 	for {
 		select {
@@ -57,12 +66,39 @@ func (e *ElasticsearchSink) Run(stopCh <-chan struct{}) {
 func (e *ElasticsearchSink) flush() {
 	entries := e.currentBuffer
 	e.currentBuffer = nil
-	klog.V(4).Infof("Elasticsearch sink flush buffer: %v", e.currentBuffer)
+	klog.V(5).Infof("Ensure elasticsearch sink buffer length: %v", e.currentBuffer)
 	go e.sendEntries(entries)
 }
 
+func (e *ElasticsearchSink) CreateIndex(name string) error {
+	resp, err := e.client.Indices.Exists([]string{name}, e.client.Indices.Exists.WithAllowNoIndices(false))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		klog.V(5).Infof("Ensure the index [%s] already exists, so skip create.", name)
+		return nil
+	}
+
+	// If index not found, create it.
+	if resp.StatusCode == http.StatusNotFound {
+		resp, err := e.client.Indices.Create(name)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.IsError() {
+			return fmt.Errorf("create index [%s] error, %s", name, resp)
+		}
+	}
+
+	return fmt.Errorf("create index [%s] have unknown response code [%d]", name, resp.StatusCode)
+}
+
 func (e *ElasticsearchSink) sendEntries(entries []*corev1.Event) {
-	klog.V(3).Infof("Sending %d entries to Elasticsearch", len(entries))
+	klog.V(1).Infof("Sending %d entries to Elasticsearch", len(entries))
 
 	var buf bytes.Buffer
 	for i, entry := range entries {
@@ -80,7 +116,11 @@ func (e *ElasticsearchSink) sendEntries(entries []*corev1.Event) {
 		buf.Write(data)
 	}
 
-	resp, err := e.client.Bulk(bytes.NewReader(buf.Bytes()), e.client.Bulk.WithIndex("kube-events"))
+	if err := e.CreateIndex(defaultIndexName); err != nil {
+		return
+	}
+
+	resp, err := e.client.Bulk(bytes.NewReader(buf.Bytes()), e.client.Bulk.WithIndex(defaultIndexName))
 	if err != nil {
 		klog.Errorf("Failure to send entries to Elasticsearch: %v", err)
 		return

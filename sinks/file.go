@@ -29,6 +29,7 @@ func (f FileSink) OnDelete(event *corev1.Event) {
 }
 
 func (f FileSink) Run(stopCh <-chan struct{}) {
+	klog.Info("Starting file sink...")
 	for {
 		select {
 		case entry := <-f.entryChannel:

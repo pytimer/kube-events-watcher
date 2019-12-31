@@ -5,9 +5,11 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/pytimer/kube-events-watcher/constants"
 	"github.com/pytimer/kube-events-watcher/flags"
 	"github.com/pytimer/kube-events-watcher/sinks"
 	"github.com/pytimer/kube-events-watcher/watchers"
@@ -20,7 +22,7 @@ import (
 )
 
 var (
-	level        string
+	level        int
 	kubeconfig   string
 	resyncPeriod time.Duration
 	sink         flags.Uri
@@ -66,18 +68,19 @@ func main() {
 	logs.InitLogs()
 	defer logs.FlushLogs()
 
-	pflag.StringVarP(&level, "v", "v", "0", "log level for V logs")
-	pflag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file. Optional, if the kubeconfig empty, this controller is running in a kubernetes cluster.")
-	pflag.DurationVar(&resyncPeriod, "resync-period", 1*time.Minute, "Watcher reflector resync period")
-	// e.g. --sink=elasticsearch:http://elasticsearch.com:9200
-	pflag.Var(&sink, "sink", "Sink type to save the kubernetes events")
+	pflag.IntVarP(&level, "v", "v", 0, "log level for V logs")
+	pflag.StringVar(&kubeconfig, "kubeconfig", "", `absolute path to the kubeconfig file. 
+Optional, if the kubeconfig empty, this controller is running in a kubernetes cluster.`)
+	pflag.DurationVar(&resyncPeriod, "resync-period", constants.DefaultResyncPeriod, "Watcher reflector resync period")
+	pflag.Var(&sink, "sink", `Sink type to save the kubernetes events. e.g. --sink=elasticsearch:http://elasticsearch.com:9200`)
 	pflag.Parse()
-	logs.GlogSetter(level)
+
+	logs.GlogSetter(strconv.Itoa(level))
 
 	klog.Info("kube-events-watcher starting...")
 	stopCh := listenSystemStopSignal()
 
-	sink, err := sinks.NewEventSinkManager(sink)
+	outSink, err := sinks.NewEventSinkManager(sink)
 	if err != nil {
 		klog.Fatalf("Failed to initialize sink: %v", err)
 	}
@@ -87,6 +90,6 @@ func main() {
 		klog.Fatalf("Failed to initialize kubernetes client: %v", err)
 	}
 
-	eventWatcher := watchers.NewEventWatcher(client, sink, resyncPeriod)
+	eventWatcher := watchers.NewEventWatcher(client, outSink, resyncPeriod)
 	eventWatcher.Run(stopCh)
 }
