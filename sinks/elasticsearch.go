@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
@@ -22,6 +24,7 @@ type ElasticsearchSink struct {
 	client        *elasticsearch.Client
 	entryChannel  chan *corev1.Event
 	currentBuffer []*corev1.Event
+	baseIndex     string
 }
 
 func (e *ElasticsearchSink) OnAdd(event *corev1.Event) {
@@ -97,14 +100,29 @@ func (e *ElasticsearchSink) CreateIndex(name string) error {
 	return fmt.Errorf("create index [%s] have unknown response code [%d]", name, resp.StatusCode)
 }
 
+func (e *ElasticsearchSink) Index(date time.Time) string {
+	return date.Format(fmt.Sprintf("%s-2006.01.02", e.baseIndex))
+}
+
 func (e *ElasticsearchSink) sendEntries(entries []*corev1.Event) {
 	klog.V(1).Infof("Sending %d entries to Elasticsearch", len(entries))
 
 	var buf bytes.Buffer
 	for i, entry := range entries {
+		indexName := defaultIndexName
+		if !entry.EventTime.IsZero() {
+			indexName = e.Index(entry.EventTime.Time)
+		}
+		if entry.EventTime.IsZero() && !entry.FirstTimestamp.IsZero() {
+			indexName = e.Index(entry.FirstTimestamp.Time)
+		}
+		if err := e.CreateIndex(indexName); err != nil {
+			klog.Errorf("Failure to create index [%s]: %v", indexName, err)
+			return
+		}
 		// Elasticsearch version less than v6.x, metadata should add "_type": "doc"
 		// TODO: generate metadata according to elasticsearch version.
-		meta := []byte(fmt.Sprintf(`{"index": {"_id": "%d", "_type" : "doc"} }%s`, i+1, "\n"))
+		meta := []byte(fmt.Sprintf(`{"index": {"_index": %s, "_id": "%d", "_type" : "doc"} }%s`, indexName, i+1, "\n"))
 		data, err := json.Marshal(entry)
 		if err != nil {
 			klog.Errorf("Cannot encode event: %v", err)
@@ -114,10 +132,6 @@ func (e *ElasticsearchSink) sendEntries(entries []*corev1.Event) {
 		buf.Grow(len(meta) + len(data))
 		buf.Write(meta)
 		buf.Write(data)
-	}
-
-	if err := e.CreateIndex(defaultIndexName); err != nil {
-		return
 	}
 
 	resp, err := e.client.Bulk(bytes.NewReader(buf.Bytes()), e.client.Bulk.WithIndex(defaultIndexName))
@@ -130,12 +144,39 @@ func (e *ElasticsearchSink) sendEntries(entries []*corev1.Event) {
 	klog.V(3).Infof("Successfully sent %d entries to Elasticsearch", len(entries))
 }
 
-func newElasticsearchSink(uri string) (*ElasticsearchSink, error) {
-	cfg := elasticsearch.Config{
-		Addresses:  []string{uri},
-		MaxRetries: 5,
-		Logger:     &estransport.ColorLogger{Output: os.Stdout, EnableRequestBody: true},
+// sink: elasticsearch:http://<ES_SERVER_URL>?maxRetries=5&debug=true&index=kube-events
+func newElasticsearchSink(uri *url.URL) (*ElasticsearchSink, error) {
+	opts, err := url.ParseQuery(uri.RawQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse url's query string: %s", err)
 	}
+
+	address := fmt.Sprintf("%s:%s", uri.Scheme, uri.Host)
+	cfg := elasticsearch.Config{
+		Addresses: []string{address},
+	}
+
+	if len(opts.Get("maxRetries")) > 0 {
+		retry, err := strconv.Atoi(opts.Get("maxRetries"))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse URL's maxRetries value into an int: %v", err)
+		}
+		cfg.MaxRetries = retry
+	}
+
+	if len(opts.Get("debug")) > 0 {
+		debug, err := strconv.ParseBool(opts.Get("debug"))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse URL's debug value into a bool: %v", err)
+		}
+		cfg.Logger = &estransport.ColorLogger{Output: os.Stdout, EnableRequestBody: debug}
+	}
+
+	index := defaultIndexName
+	if len(opts.Get("index")) > 0 {
+		index = opts.Get("index")
+	}
+
 	esClient, err := elasticsearch.NewClient(cfg)
 	if err != nil {
 		return nil, err
@@ -143,5 +184,6 @@ func newElasticsearchSink(uri string) (*ElasticsearchSink, error) {
 	return &ElasticsearchSink{
 		client:       esClient,
 		entryChannel: make(chan *corev1.Event, defaultMaxBufferSize),
+		baseIndex:    index,
 	}, nil
 }
