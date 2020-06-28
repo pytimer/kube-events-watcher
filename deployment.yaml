@@ -1,7 +1,27 @@
+# RBAC authn and authz
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  namespace: kube-system
+  name: kube-events-watcher
+  labels:
+    k8s-app: kube-events-watcher
+    addonmanager.kubernetes.io/mode: Reconcile
+subjects:
+  - kind: ServiceAccount
+    name: kube-events-watcher
+    namespace: kube-system
+    apiGroup: ""
+roleRef:
+  kind: ClusterRole
+  name: view
+  apiGroup: ""
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kube-events-watcher
+  namespace: kube-system
   labels:
     k8s-app: kube-events-watcher
 spec:
@@ -14,6 +34,7 @@ spec:
       labels:
         k8s-app: kube-events-watcher
     spec:
+      serviceAccountName: kube-events-watcher
       containers:
         - name: watcher
           image: pytimer/kube-events-watcher:1.0.0
