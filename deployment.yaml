@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-events-watcher
+  labels:
+    k8s-app: kube-events-watcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: kube-events-watcher
+  template:
+    metadata:
+      labels:
+        k8s-app: kube-events-watcher
+    spec:
+      containers:
+        - name: watcher
+          image: pytimer/kube-events-watcher:1.0.0
+          args:
+            - "--sink"
+            - "elasticsearch:http://elasticsearch:9200?maxRetries=5&index=events"
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              cpu: 1
+            requests:
+              cpu: 200m
+
+
