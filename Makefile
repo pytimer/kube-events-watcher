@@ -11,4 +11,4 @@ push:
 	docker push ${PREFIX}/${IMAGE}:${TAG}
 
 build:
-	CGO_ENABLED=0 GOOS=linux GO111MODULE=off go build -o ./kube-events-watcher main.go
+	CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build -o ./kube-events-watcher main.go

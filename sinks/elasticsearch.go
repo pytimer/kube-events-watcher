@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/olivere/elastic/v7"
+	"github.com/pytimer/kube-events-watcher/events"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog"
 )
@@ -104,18 +105,25 @@ func (e *ElasticsearchSink) sendEntries(entries []*corev1.Event) {
 
 	bulkRequest := e.client.Bulk()
 	for _, entry := range entries {
+		eventEntry := events.Entry{
+			Event: entry,
+		}
 		indexName := defaultIndexName
+
 		if !entry.EventTime.IsZero() {
+			eventEntry.Timestamp = entry.EventTime.Time
 			indexName = e.Index(entry.EventTime.Time)
 		}
 		if entry.EventTime.IsZero() && !entry.FirstTimestamp.IsZero() {
+			eventEntry.Timestamp = entry.FirstTimestamp.Time
 			indexName = e.Index(entry.FirstTimestamp.Time)
 		}
 		if err := e.CreateIndex(indexName); err != nil {
 			klog.Errorf("Failure to create index [%s]: %v", indexName, err)
 			return
 		}
-		bulkRequest.Add(elastic.NewBulkIndexRequest().Index(indexName).Id(string(entry.ObjectMeta.UID)).Doc(entry))
+
+		bulkRequest.Add(elastic.NewBulkIndexRequest().Index(indexName).Id(string(entry.ObjectMeta.UID)).Doc(eventEntry))
 	}
 
 	resp, err := bulkRequest.Do(context.Background())
@@ -180,5 +188,5 @@ func newElasticsearchSink(uri *url.URL) (*ElasticsearchSink, error) {
 type wrapKlog struct{}
 
 func (l wrapKlog) Printf(format string, v ...interface{}) {
-	klog.Infof(format, v)
+	klog.Infof(format, v...)
 }
