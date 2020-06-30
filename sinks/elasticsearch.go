@@ -188,5 +188,5 @@ func newElasticsearchSink(uri *url.URL) (*ElasticsearchSink, error) {
 type wrapKlog struct{}
 
 func (l wrapKlog) Printf(format string, v ...interface{}) {
-	klog.Infof(format, v)
+	klog.Infof(format, v...)
 }
