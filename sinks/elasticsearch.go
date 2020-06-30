@@ -1,17 +1,13 @@
 package sinks
 
 import (
-	"bytes"
-	"encoding/json"
+	"context"
 	"fmt"
-	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"time"
 
-	"github.com/elastic/go-elasticsearch/v8"
-	"github.com/elastic/go-elasticsearch/v8/estransport"
+	"github.com/olivere/elastic/v7"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog"
 )
@@ -21,10 +17,11 @@ var (
 )
 
 type ElasticsearchSink struct {
-	client        *elasticsearch.Client
+	client        *elastic.Client
 	entryChannel  chan *corev1.Event
 	currentBuffer []*corev1.Event
 	baseIndex     string
+	//bulkProcessor *elastic.BulkProcessor
 }
 
 func (e *ElasticsearchSink) OnAdd(event *corev1.Event) {
@@ -70,34 +67,32 @@ func (e *ElasticsearchSink) flush() {
 	entries := e.currentBuffer
 	e.currentBuffer = nil
 	klog.V(5).Infof("Ensure elasticsearch sink buffer length: %v", e.currentBuffer)
-	go e.sendEntries(entries)
+	if len(entries) > 0 {
+		go e.sendEntries(entries)
+	}
 }
 
 func (e *ElasticsearchSink) CreateIndex(name string) error {
-	resp, err := e.client.Indices.Exists([]string{name}, e.client.Indices.Exists.WithAllowNoIndices(false))
+	ctx := context.Background()
+	exists, err := e.client.IndexExists(name).Do(ctx)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusOK {
+	if exists {
 		klog.V(5).Infof("Ensure the index [%s] already exists, so skip create.", name)
 		return nil
 	}
 
-	// If index not found, create it.
-	if resp.StatusCode == http.StatusNotFound {
-		resp, err := e.client.Indices.Create(name)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		if resp.IsError() {
-			return fmt.Errorf("create index [%s] error, %s", name, resp)
-		}
+	resp, err := e.client.CreateIndex(name).Do(ctx)
+	if err != nil {
+		return err
+	}
+	if !resp.Acknowledged {
+		return fmt.Errorf("create index [%s] error, %s", name, err)
 	}
 
-	return fmt.Errorf("create index [%s] have unknown response code [%d]", name, resp.StatusCode)
+	return nil
 }
 
 func (e *ElasticsearchSink) Index(date time.Time) string {
@@ -107,8 +102,8 @@ func (e *ElasticsearchSink) Index(date time.Time) string {
 func (e *ElasticsearchSink) sendEntries(entries []*corev1.Event) {
 	klog.V(1).Infof("Sending %d entries to Elasticsearch", len(entries))
 
-	var buf bytes.Buffer
-	for i, entry := range entries {
+	bulkRequest := e.client.Bulk()
+	for _, entry := range entries {
 		indexName := defaultIndexName
 		if !entry.EventTime.IsZero() {
 			indexName = e.Index(entry.EventTime.Time)
@@ -120,27 +115,14 @@ func (e *ElasticsearchSink) sendEntries(entries []*corev1.Event) {
 			klog.Errorf("Failure to create index [%s]: %v", indexName, err)
 			return
 		}
-		// Elasticsearch version less than v6.x, metadata should add "_type": "doc"
-		// TODO: generate metadata according to elasticsearch version.
-		meta := []byte(fmt.Sprintf(`{"index": {"_index": %s, "_id": "%d", "_type" : "doc"} }%s`, indexName, i+1, "\n"))
-		data, err := json.Marshal(entry)
-		if err != nil {
-			klog.Errorf("Cannot encode event: %v", err)
-			continue
-		}
-		data = append(data, "\n"...)
-		buf.Grow(len(meta) + len(data))
-		buf.Write(meta)
-		buf.Write(data)
+		bulkRequest.Add(elastic.NewBulkIndexRequest().Index(indexName).Id(string(entry.ObjectMeta.UID)).Doc(entry))
 	}
 
-	resp, err := e.client.Bulk(bytes.NewReader(buf.Bytes()), e.client.Bulk.WithIndex(defaultIndexName))
+	resp, err := bulkRequest.Do(context.Background())
 	if err != nil {
-		klog.Errorf("Failure to send entries to Elasticsearch: %v", err)
+		klog.Warningf("Failure to send entries to Elasticsearch, items: %v, reason: %v", resp.Failed(), err)
 		return
 	}
-	resp.Body.Close()
-	buf.Reset()
 	klog.V(3).Infof("Successfully sent %d entries to Elasticsearch", len(entries))
 }
 
@@ -151,17 +133,18 @@ func newElasticsearchSink(uri *url.URL) (*ElasticsearchSink, error) {
 		return nil, fmt.Errorf("failed to parse url's query string: %s", err)
 	}
 
-	address := fmt.Sprintf("%s:%s", uri.Scheme, uri.Host)
-	cfg := elasticsearch.Config{
-		Addresses: []string{address},
-	}
+	var startupFns []elastic.ClientOptionFunc
+
+	address := fmt.Sprintf("%s://%s", uri.Scheme, uri.Host)
+	klog.V(3).Infof("Elasticsearch address %s", address)
+	startupFns = append(startupFns, elastic.SetURL(address))
 
 	if len(opts.Get("maxRetries")) > 0 {
 		retry, err := strconv.Atoi(opts.Get("maxRetries"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse URL's maxRetries value into an int: %v", err)
 		}
-		cfg.MaxRetries = retry
+		startupFns = append(startupFns, elastic.SetMaxRetries(retry))
 	}
 
 	if len(opts.Get("debug")) > 0 {
@@ -169,7 +152,11 @@ func newElasticsearchSink(uri *url.URL) (*ElasticsearchSink, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse URL's debug value into a bool: %v", err)
 		}
-		cfg.Logger = &estransport.ColorLogger{Output: os.Stdout, EnableRequestBody: debug}
+		if debug {
+			startupFns = append(startupFns, elastic.SetInfoLog(wrapKlog{}))
+			startupFns = append(startupFns, elastic.SetErrorLog(wrapKlog{}))
+			startupFns = append(startupFns, elastic.SetTraceLog(wrapKlog{}))
+		}
 	}
 
 	index := defaultIndexName
@@ -177,13 +164,21 @@ func newElasticsearchSink(uri *url.URL) (*ElasticsearchSink, error) {
 		index = opts.Get("index")
 	}
 
-	esClient, err := elasticsearch.NewClient(cfg)
+	esClient, err := elastic.NewClient(startupFns...)
 	if err != nil {
 		return nil, err
 	}
+
+	klog.Info("Elasticsearch sink configuration successfully.")
 	return &ElasticsearchSink{
 		client:       esClient,
 		entryChannel: make(chan *corev1.Event, defaultMaxBufferSize),
 		baseIndex:    index,
 	}, nil
+}
+
+type wrapKlog struct{}
+
+func (l wrapKlog) Printf(format string, v ...interface{}) {
+	klog.Infof(format, v)
 }
