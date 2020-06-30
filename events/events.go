@@ -1,10 +1,17 @@
 package events
 
 import (
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 )
+
+type Entry struct {
+	Event *corev1.Event `json:"event"`
+	Timestamp time.Time `json:"@timestamp"`
+}
 
 type EventHandler interface {
 	OnAdd(event *corev1.Event)
