@@ -134,7 +134,7 @@ func (e *ElasticsearchSink) sendEntries(entries []*corev1.Event) {
 	klog.V(3).Infof("Successfully sent %d entries to Elasticsearch", len(entries))
 }
 
-// sink: elasticsearch:http://<ES_SERVER_URL>?maxRetries=5&debug=true&index=kube-events
+// sink: elasticsearch:http://<ES_SERVER_URL>?maxRetries=5&debug=true&index=kube-events&esUserName=&esUserSecret=
 func newElasticsearchSink(uri *url.URL) (*ElasticsearchSink, error) {
 	opts, err := url.ParseQuery(uri.RawQuery)
 	if err != nil {
@@ -170,6 +170,10 @@ func newElasticsearchSink(uri *url.URL) (*ElasticsearchSink, error) {
 	index := defaultIndexName
 	if len(opts.Get("index")) > 0 {
 		index = opts.Get("index")
+	}
+
+	if len(opts.Get("esUserName")) > 0 && len(opts.Get("esUserSecret")) > 0 {
+		startupFns = append(startupFns, elastic.SetBasicAuth(opts.Get("esUserName"), opts.Get("esUserSecret")))
 	}
 
 	esClient, err := elastic.NewClient(startupFns...)
